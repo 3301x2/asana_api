@@ -121,6 +121,49 @@ python asana_api.py list-tasks --project "my"  # if unique partial match
 
 When `--project` is provided, task names can be used with `--task` as well.
 
+## Automation: GitHub-to-Asana Sync
+
+Automatically create Asana boards and tickets from your GitHub commit history using GitHub Actions.
+
+### What it does
+
+- **Weekly sync (Fridays)**: Scans all your GitHub repos for new commits, groups them into logical tasks, and creates Asana tickets in the matching board
+- **New repo detection (Mondays)**: Detects repos without Asana boards and auto-creates them with standard sections (Done, In Progress, Backlog)
+- **Manual trigger**: Run either workflow on-demand from the Actions tab
+
+### Setup
+
+1. Go to your `asana_api` repo on GitHub → Settings → Secrets and variables → Actions
+
+2. Add these **secrets**:
+   - `ASANA_PAT` — Your Asana Personal Access Token
+   - `ASANA_WORKSPACE_GID` — Your Asana workspace GID
+   - `GH_TOKEN` — A GitHub PAT with `repo` scope (to read private repos)
+   - `GITHUB_OWNER` — Your GitHub username (e.g. `3301x2`)
+
+3. (Optional) Add a **variable** `SKIP_REPOS` with comma-separated repo names to exclude
+
+4. Push this repo to GitHub — the workflows will activate automatically
+
+### Running locally
+
+```bash
+export ASANA_PAT="your_token"
+export ASANA_WORKSPACE_GID="your_workspace_gid"
+export GH_TOKEN="your_github_token"
+export GITHUB_OWNER="your_github_username"
+
+python3 sync_commits.py
+```
+
+### How commits become tasks
+
+- Conventional commits (`feat:`, `fix:`, `docs:`, etc.) are categorized automatically
+- Commits with the same prefix and similar message are grouped into a single task
+- Duplicate task names are skipped (safe to re-run)
+- New tasks land in the **Backlog** section
+- Sync state is persisted between runs to avoid re-processing
+
 ## Requirements
 
 - Python 3.7+

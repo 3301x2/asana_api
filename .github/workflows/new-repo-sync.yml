@@ -1,0 +1,83 @@
+name: New Repo Board Creator
+
+on:
+  # Trigger when a new repo is created (via repository_dispatch from a webhook)
+  repository_dispatch:
+    types: [new-repo-created]
+  # Also check daily for any new repos that were missed
+  schedule:
+    - cron: '0 8 * * 1'  # Monday 8am UTC
+  workflow_dispatch:
+    inputs:
+      repo_name:
+        description: 'Specific repo name to create a board for (leave empty for auto-detect)'
+        required: false
+
+jobs:
+  create-board:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore sync state
+        uses: actions/cache@v4
+        with:
+          path: .sync_state.json
+          key: sync-state-${{ github.run_id }}
+          restore-keys: |
+            sync-state-
+
+      - name: Detect and create boards for new repos
+        env:
+          ASANA_PAT: ${{ secrets.ASANA_PAT }}
+          ASANA_WORKSPACE_GID: ${{ secrets.ASANA_WORKSPACE_GID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_OWNER: ${{ secrets.GITHUB_OWNER }}
+          SKIP_REPOS: ${{ vars.SKIP_REPOS || '' }}
+          SPECIFIC_REPO: ${{ github.event.inputs.repo_name || github.event.client_payload.repo_name || '' }}
+        run: |
+          python3 -c "
+          import os, sys
+          sys.path.insert(0, '.')
+          from sync_commits import *
+
+          validate_env()
+
+          specific = os.environ.get('SPECIFIC_REPO', '').strip()
+          repos = get_all_repos()
+          asana_projects = get_asana_projects()
+          project_names = {p['name'].strip().lower() for p in asana_projects}
+          state = load_state()
+
+          for repo in repos:
+              name = repo['name']
+              if specific and name != specific:
+                  continue
+              if name in SKIP_REPOS:
+                  continue
+              # Check if board already exists
+              if name.lower() in project_names:
+                  continue
+              alt = name.replace('-', ' ').title().lower()
+              if alt in project_names:
+                  continue
+
+              print(f'New repo detected: {name}')
+              sync_repo(repo, asana_projects, state)
+
+          save_state(state)
+          print('Done!')
+          "
+
+      - name: Save sync state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .sync_state.json
+          key: sync-state-${{ github.run_id }}
