@@ -31,7 +31,7 @@ jobs:
           ASANA_PAT: ${{ secrets.ASANA_PAT }}
           ASANA_WORKSPACE_GID: ${{ secrets.ASANA_WORKSPACE_GID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GITHUB_OWNER: ${{ secrets.GITHUB_OWNER }}
+          GITHUB_OWNER: ${{ secrets.GH_OWNER }}
           SKIP_REPOS: ${{ vars.SKIP_REPOS || '' }}
         run: python3 sync_commits.py
 
