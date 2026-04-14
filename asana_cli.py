@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Asana Manager CLI
+Asana CLI
 
 A zero-dependency command-line interface for managing Asana workspaces.
 Supports projects, tasks, sections, tags, and team members with
@@ -11,8 +11,8 @@ Authentication:
     Optionally set ASANA_WORKSPACE_GID to target a specific workspace.
 
 Usage:
-    python asana_api.py <command> [options]
-    python asana_api.py --help
+    python asana_cli.py <command> [options]
+    python asana_cli.py --help
 """
 
 from __future__ import annotations
@@ -62,19 +62,6 @@ class AsanaClient:
         }
 
     def request(self, method: str, endpoint: str, data: Optional[dict] = None) -> dict:
-        """Send an authenticated request to the Asana API.
-
-        Args:
-            method: HTTP method (GET, POST, PUT, DELETE).
-            endpoint: API path relative to the base URL (e.g. "/tasks").
-            data: Optional payload for write operations.
-
-        Returns:
-            Parsed JSON response as a dictionary.
-
-        Raises:
-            AsanaAPIError: If the API returns a non-2xx status code.
-        """
         url = f"{API_BASE_URL}{endpoint}"
         body = json.dumps({"data": data}).encode() if data is not None else None
         req = urllib.request.Request(url, data=body, headers=self.headers, method=method)
@@ -91,11 +78,7 @@ class AsanaClient:
 
 
 class NameResolver:
-    """Resolves human-friendly names to Asana GIDs with caching.
-
-    Performs case-insensitive matching with partial-match support.
-    Priority: exact match > unique partial match > error on ambiguity.
-    """
+    """Resolves human-friendly names to Asana GIDs with caching."""
 
     def __init__(self, client: AsanaClient, workspace_gid: str) -> None:
         self._client = client
@@ -103,30 +86,13 @@ class NameResolver:
         self._project_cache: Optional[list[dict]] = None
         self._section_cache: dict[str, list[dict]] = {}
 
-    def _fuzzy_match(
-        self, items: list[dict], query: str, label: str = "item"
-    ) -> str:
-        """Match a query string against a list of named items.
-
-        Args:
-            items: List of dicts with "gid" and "name" keys.
-            query: Search string to match against.
-            label: Human-readable label for error messages.
-
-        Returns:
-            The GID of the matched item.
-
-        Raises:
-            ResolutionError: If no match or ambiguous match is found.
-        """
+    def _fuzzy_match(self, items: list[dict], query: str, label: str = "item") -> str:
         normalized = query.strip().lower()
 
-        # Exact match takes priority
         for item in items:
             if item["name"].strip().lower() == normalized:
                 return item["gid"]
 
-        # Fall back to partial match
         matches = [i for i in items if normalized in i["name"].strip().lower()]
 
         if len(matches) == 1:
@@ -143,7 +109,6 @@ class NameResolver:
         raise ResolutionError(f'No {label} found matching "{query}".')
 
     def project(self, identifier: str) -> str:
-        """Resolve a project name or GID to a GID."""
         if identifier.isdigit():
             return identifier
 
@@ -155,7 +120,6 @@ class NameResolver:
         return self._fuzzy_match(self._project_cache, identifier, "project")
 
     def section(self, identifier: str, project_gid: str) -> str:
-        """Resolve a section name or GID to a GID within a project."""
         if identifier.isdigit():
             return identifier
 
@@ -170,11 +134,6 @@ class NameResolver:
         )
 
     def task(self, identifier: str, project_gid: Optional[str] = None) -> str:
-        """Resolve a task name or GID to a GID.
-
-        Numeric identifiers longer than 8 digits are treated as GIDs.
-        Name resolution requires a project context.
-        """
         if identifier.isdigit() and len(identifier) > 8:
             return identifier
 
@@ -191,10 +150,6 @@ class NameResolver:
 
 
 def write_audit_entry(action: str, details: dict[str, Any]) -> None:
-    """Append a timestamped entry to the JSONL audit log.
-
-    Silently skips if the log file cannot be written (e.g. read-only filesystem).
-    """
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": action,
@@ -211,12 +166,10 @@ def write_audit_entry(action: str, details: dict[str, Any]) -> None:
 
 
 def _print_json(data: Any) -> None:
-    """Pretty-print a JSON-serializable object to stdout."""
     print(json.dumps(data, indent=2))
 
 
 def _format_task(raw: dict) -> dict:
-    """Normalize an Asana task response into a consistent output format."""
     return {
         "gid": raw["gid"],
         "name": raw["name"],
@@ -228,9 +181,6 @@ def _format_task(raw: dict) -> dict:
 
 
 # ── Command Handlers ─────────────────────────────────────────────────────────
-#
-# Each handler receives the parsed CLI args and operates through the shared
-# `client` and `resolver` instances initialized in main().
 
 client: AsanaClient
 resolver: NameResolver
@@ -238,7 +188,6 @@ workspace_gid: str
 
 
 def _resolve_task_with_project(args: argparse.Namespace) -> tuple[str, Optional[str]]:
-    """Common pattern: resolve task GID, optionally via project context."""
     project_gid = resolver.project(args.project) if args.project else None
     task_gid = resolver.task(args.task, project_gid) if project_gid else args.task
     return task_gid, project_gid
@@ -318,11 +267,41 @@ def cmd_complete_task(args: argparse.Namespace) -> None:
     write_audit_entry("complete-task", {"task_gid": task["gid"], "name": task["name"]})
 
 
+def cmd_uncomplete_task(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    task = client.request("PUT", f"/tasks/{task_gid}", {"completed": False})["data"]
+    _print_json({"status": "reopened", "task_gid": task["gid"], "name": task["name"]})
+    write_audit_entry("uncomplete-task", {"task_gid": task["gid"], "name": task["name"]})
+
+
 def cmd_delete_task(args: argparse.Namespace) -> None:
     task_gid, _ = _resolve_task_with_project(args)
     client.request("DELETE", f"/tasks/{task_gid}")
     _print_json({"status": "deleted", "task_gid": task_gid})
     write_audit_entry("delete-task", {"task_gid": task_gid})
+
+
+def cmd_get_task(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    fields = "name,notes,completed,assignee.name,due_on,start_on,tags.name,memberships.project.name,memberships.section.name,parent.name,num_subtasks,permalink_url"
+    task = client.request("GET", f"/tasks/{task_gid}?opt_fields={fields}")["data"]
+    _print_json({
+        "gid": task["gid"],
+        "name": task["name"],
+        "notes": task.get("notes", ""),
+        "completed": task.get("completed", False),
+        "assignee": (task.get("assignee") or {}).get("name"),
+        "due_on": task.get("due_on"),
+        "start_on": task.get("start_on"),
+        "tags": [t["name"] for t in task.get("tags", [])],
+        "parent": (task.get("parent") or {}).get("name"),
+        "num_subtasks": task.get("num_subtasks", 0),
+        "memberships": [
+            {"project": (m.get("project") or {}).get("name"), "section": (m.get("section") or {}).get("name")}
+            for m in task.get("memberships", [])
+        ],
+        "url": task.get("permalink_url", ""),
+    })
 
 
 def cmd_list_tasks(args: argparse.Namespace) -> None:
@@ -350,6 +329,165 @@ def cmd_list_tasks(args: argparse.Namespace) -> None:
 
     else:
         sys.exit("Error: provide --project and/or --section")
+
+
+def cmd_search_tasks(args: argparse.Namespace) -> None:
+    # Try Asana search API first (requires premium), fall back to local scan
+    try:
+        params = f"text={urllib.request.quote(args.query)}&opt_fields=name,completed,assignee.name,due_on,memberships.project.name,memberships.section.name&limit=50"
+        if args.project:
+            project_gid = resolver.project(args.project)
+            params += f"&projects.any={project_gid}"
+        if args.completed is not None:
+            params += f"&completed={str(args.completed).lower()}"
+
+        result = client.request("GET", f"/workspaces/{workspace_gid}/tasks/search?{params}")
+        tasks = []
+        for t in result["data"]:
+            entry = _format_task(t)
+            memberships = t.get("memberships", [])
+            if memberships:
+                entry["project"] = (memberships[0].get("project") or {}).get("name")
+                entry["section"] = (memberships[0].get("section") or {}).get("name")
+            tasks.append(entry)
+        _print_json({"query": args.query, "count": len(tasks), "tasks": tasks})
+    except AsanaAPIError as exc:
+        if exc.status_code == 402:
+            # Premium required — fall back to local project scan
+            query = args.query.lower()
+            if not args.project:
+                sys.exit("Error: --project is required for search on free Asana plans.")
+            project_gid = resolver.project(args.project)
+            fields = "name,completed,assignee.name,due_on,tags.name"
+            sections = client.request("GET", f"/projects/{project_gid}/sections?opt_fields=name")["data"]
+            tasks = []
+            for sec in sections:
+                result = client.request("GET", f"/sections/{sec['gid']}/tasks?opt_fields={fields}&limit=100")
+                for t in result["data"]:
+                    if query in t["name"].lower():
+                        tasks.append({**_format_task(t), "section": sec["name"]})
+            _print_json({"query": args.query, "count": len(tasks), "tasks": tasks, "mode": "local"})
+        else:
+            raise
+
+
+# -- Subtasks --
+
+def cmd_add_subtask(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    data: dict[str, Any] = {"name": args.name}
+    if args.notes:
+        data["notes"] = args.notes
+    if args.assignee:
+        data["assignee"] = args.assignee
+    if args.due_on:
+        data["due_on"] = args.due_on
+
+    subtask = client.request("POST", f"/tasks/{task_gid}/subtasks", data)["data"]
+    _print_json({
+        "status": "created",
+        "subtask_gid": subtask["gid"],
+        "name": subtask["name"],
+        "parent_gid": task_gid,
+        "url": f"https://app.asana.com/0/0/{subtask['gid']}/f",
+    })
+    write_audit_entry("add-subtask", {
+        "subtask_gid": subtask["gid"], "name": subtask["name"], "parent_gid": task_gid,
+    })
+
+
+def cmd_list_subtasks(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    fields = "name,completed,assignee.name,due_on"
+    result = client.request("GET", f"/tasks/{task_gid}/subtasks?opt_fields={fields}&limit=100")
+    _print_json({
+        "parent_gid": task_gid,
+        "subtasks": [_format_task(t) for t in result["data"]],
+    })
+
+
+# -- Comments --
+
+def cmd_add_comment(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    story = client.request("POST", f"/tasks/{task_gid}/stories", {"text": args.text})["data"]
+    _print_json({
+        "status": "commented",
+        "story_gid": story["gid"],
+        "task_gid": task_gid,
+        "text": args.text,
+    })
+    write_audit_entry("add-comment", {"task_gid": task_gid, "story_gid": story["gid"]})
+
+
+def cmd_list_comments(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    result = client.request("GET", f"/tasks/{task_gid}/stories?opt_fields=text,created_by.name,created_at,type&limit=100")
+    comments = [
+        {
+            "gid": s["gid"],
+            "text": s.get("text", ""),
+            "author": (s.get("created_by") or {}).get("name"),
+            "created_at": s.get("created_at"),
+        }
+        for s in result["data"]
+        if s.get("type") == "comment"
+    ]
+    _print_json({"task_gid": task_gid, "comments": comments, "count": len(comments)})
+
+
+# -- Dependencies --
+
+def cmd_add_dependency(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    dep_gid = args.depends_on
+    client.request("POST", f"/tasks/{task_gid}/addDependencies", {"dependencies": [dep_gid]})
+    _print_json({"status": "dependency_added", "task_gid": task_gid, "depends_on": dep_gid})
+    write_audit_entry("add-dependency", {"task_gid": task_gid, "depends_on": dep_gid})
+
+
+def cmd_remove_dependency(args: argparse.Namespace) -> None:
+    task_gid, _ = _resolve_task_with_project(args)
+    dep_gid = args.depends_on
+    client.request("POST", f"/tasks/{task_gid}/removeDependencies", {"dependencies": [dep_gid]})
+    _print_json({"status": "dependency_removed", "task_gid": task_gid, "depends_on": dep_gid})
+    write_audit_entry("remove-dependency", {"task_gid": task_gid, "depends_on": dep_gid})
+
+
+# -- Bulk Operations --
+
+def cmd_bulk_complete(args: argparse.Namespace) -> None:
+    task_gids = args.tasks.split(",")
+    results = []
+    for gid in task_gids:
+        gid = gid.strip()
+        try:
+            task = client.request("PUT", f"/tasks/{gid}", {"completed": True})["data"]
+            results.append({"gid": task["gid"], "name": task["name"], "status": "completed"})
+            write_audit_entry("complete-task", {"task_gid": task["gid"], "name": task["name"]})
+        except AsanaAPIError as exc:
+            results.append({"gid": gid, "status": "error", "error": str(exc)})
+    _print_json({"completed": len([r for r in results if r["status"] == "completed"]),
+                 "errors": len([r for r in results if r["status"] == "error"]),
+                 "results": results})
+
+
+def cmd_bulk_move(args: argparse.Namespace) -> None:
+    project_gid = resolver.project(args.project) if args.project else None
+    section_gid = resolver.section(args.section, project_gid) if project_gid else args.section
+    task_gids = args.tasks.split(",")
+    results = []
+    for gid in task_gids:
+        gid = gid.strip()
+        try:
+            client.request("POST", f"/sections/{section_gid}/addTask", {"task": gid})
+            results.append({"gid": gid, "status": "moved"})
+            write_audit_entry("move-task", {"task_gid": gid, "to_section": section_gid})
+        except AsanaAPIError as exc:
+            results.append({"gid": gid, "status": "error", "error": str(exc)})
+    _print_json({"moved": len([r for r in results if r["status"] == "moved"]),
+                 "errors": len([r for r in results if r["status"] == "error"]),
+                 "results": results})
 
 
 # -- Tags --
@@ -445,6 +583,35 @@ def cmd_create_project(args: argparse.Namespace) -> None:
     write_audit_entry("create-project", {"project_gid": project["gid"], "name": project["name"]})
 
 
+def cmd_get_project(args: argparse.Namespace) -> None:
+    gid = resolver.project(args.project)
+    fields = "name,notes,archived,due_on,owner.name,color,permalink_url,members.name"
+    project = client.request("GET", f"/projects/{gid}?opt_fields={fields}")["data"]
+    sections = client.request("GET", f"/projects/{gid}/sections?opt_fields=name")["data"]
+
+    task_count = 0
+    completed_count = 0
+    for sec in sections:
+        tasks = client.request("GET", f"/sections/{sec['gid']}/tasks?opt_fields=completed&limit=100")["data"]
+        task_count += len(tasks)
+        completed_count += sum(1 for t in tasks if t.get("completed"))
+
+    _print_json({
+        "gid": project["gid"],
+        "name": project["name"],
+        "notes": project.get("notes", ""),
+        "archived": project.get("archived", False),
+        "due_on": project.get("due_on"),
+        "owner": (project.get("owner") or {}).get("name"),
+        "color": project.get("color"),
+        "members": [m.get("name") for m in project.get("members", [])],
+        "sections": [s["name"] for s in sections],
+        "total_tasks": task_count,
+        "completed_tasks": completed_count,
+        "url": project.get("permalink_url", ""),
+    })
+
+
 def cmd_list_projects(args: argparse.Namespace) -> None:
     fields = "name,owner.name,archived,due_on"
     result = client.request("GET", f"/workspaces/{workspace_gid}/projects?opt_fields={fields}&limit=100")
@@ -489,6 +656,47 @@ def cmd_delete_project(args: argparse.Namespace) -> None:
     write_audit_entry("delete-project", {"project_gid": gid})
 
 
+def cmd_update_project(args: argparse.Namespace) -> None:
+    gid = resolver.project(args.project)
+    data: dict[str, str] = {}
+    if args.name is not None:
+        data["name"] = args.name
+    if args.notes is not None:
+        data["notes"] = args.notes
+    if args.color is not None:
+        data["color"] = args.color
+    if not data:
+        sys.exit("Error: provide at least one field to update (--name, --notes, --color).")
+    project = client.request("PUT", f"/projects/{gid}", data)["data"]
+    _print_json({
+        "status": "updated",
+        "project_gid": project["gid"],
+        "name": project["name"],
+        "url": f"https://app.asana.com/0/{project['gid']}",
+    })
+    write_audit_entry("update-project", {"project_gid": project["gid"], "name": project["name"]})
+
+
+def cmd_duplicate_project(args: argparse.Namespace) -> None:
+    gid = resolver.project(args.project)
+    data: dict[str, Any] = {
+        "name": args.name,
+        "include": ["members", "task_notes", "task_assignee", "task_subtasks", "task_tags"],
+    }
+    result = client.request("POST", f"/projects/{gid}/duplicate", data)["data"]
+    job_gid = result.get("gid", "")
+    new_project = result.get("new_project", {})
+    _print_json({
+        "status": "duplicating",
+        "job_gid": job_gid,
+        "new_project_gid": new_project.get("gid"),
+        "new_project_name": new_project.get("name"),
+    })
+    write_audit_entry("duplicate-project", {
+        "source_gid": gid, "new_name": args.name, "job_gid": job_gid,
+    })
+
+
 # -- Members --
 
 def cmd_list_members(args: argparse.Namespace) -> None:
@@ -527,7 +735,6 @@ def cmd_remove_member(args: argparse.Namespace) -> None:
         users = result["data"]
         query = identifier.lower()
 
-        # Try exact match on name or email
         match = next(
             (u for u in users
              if u.get("name", "").strip().lower() == query
@@ -535,7 +742,6 @@ def cmd_remove_member(args: argparse.Namespace) -> None:
             None,
         )
 
-        # Fall back to partial match on name
         if not match:
             matches = [u for u in users if query in u.get("name", "").strip().lower()]
             if len(matches) == 1:
@@ -606,15 +812,17 @@ def cmd_audit_log(args: argparse.Namespace) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Construct the argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="asana",
-        description="Asana Manager CLI — manage your workspace from the terminal.",
+        description="Asana CLI — manage your workspace from the terminal.",
         epilog=(
             "Examples:\n"
             '  asana create-task --project "MaestroOS" --name "Fix auth bug"\n'
             '  asana list-tasks --project "MaestroOS" --section "In Progress"\n'
-            '  asana archive-project --project "Old Project"\n'
+            '  asana search-tasks --query "auth" --project "MaestroOS"\n'
+            '  asana get-task --task 1234567890123 \n'
+            '  asana add-comment --task 1234567890123 --text "Done!"\n'
+            '  asana bulk-complete --tasks "gid1,gid2,gid3"\n'
             "\n"
             "All identifiers accept names (case-insensitive, partial match) or GIDs."
         ),
@@ -633,6 +841,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--due-on", help="Due date (YYYY-MM-DD)")
     p.add_argument("--start-on", help="Start date (YYYY-MM-DD)")
     p.set_defaults(func=cmd_create_task)
+
+    p = sub.add_parser("get-task", help="View full task details")
+    p.add_argument("--task", required=True, help="Task name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.set_defaults(func=cmd_get_task)
 
     p = sub.add_parser("update-task", help="Update task properties")
     p.add_argument("--task", required=True, help="Task name or GID")
@@ -656,6 +869,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", help="Project context for name resolution")
     p.set_defaults(func=cmd_complete_task)
 
+    p = sub.add_parser("uncomplete-task", help="Reopen a completed task")
+    p.add_argument("--task", required=True, help="Task name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.set_defaults(func=cmd_uncomplete_task)
+
     p = sub.add_parser("delete-task", help="Delete a task permanently")
     p.add_argument("--task", required=True, help="Task name or GID")
     p.add_argument("--project", help="Project context for name resolution")
@@ -665,6 +883,68 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", help="Project name or GID")
     p.add_argument("--section", help="Section name or GID")
     p.set_defaults(func=cmd_list_tasks)
+
+    p = sub.add_parser("search-tasks", help="Search tasks across projects")
+    p.add_argument("--query", required=True, help="Search text")
+    p.add_argument("--project", help="Limit to a specific project")
+    p.add_argument("--completed", type=lambda x: x.lower() == "true", default=None,
+                   help="Filter by completion (true/false)")
+    p.set_defaults(func=cmd_search_tasks)
+
+    # ── Subtasks ──
+
+    p = sub.add_parser("add-subtask", help="Create a subtask under a task")
+    p.add_argument("--task", required=True, help="Parent task name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.add_argument("--name", required=True, help="Subtask name")
+    p.add_argument("--notes", default="", help="Subtask description")
+    p.add_argument("--assignee", help="Assignee")
+    p.add_argument("--due-on", help="Due date (YYYY-MM-DD)")
+    p.set_defaults(func=cmd_add_subtask)
+
+    p = sub.add_parser("list-subtasks", help="List subtasks of a task")
+    p.add_argument("--task", required=True, help="Parent task name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.set_defaults(func=cmd_list_subtasks)
+
+    # ── Comments ──
+
+    p = sub.add_parser("add-comment", help="Add a comment to a task")
+    p.add_argument("--task", required=True, help="Task name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.add_argument("--text", required=True, help="Comment text")
+    p.set_defaults(func=cmd_add_comment)
+
+    p = sub.add_parser("list-comments", help="List comments on a task")
+    p.add_argument("--task", required=True, help="Task name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.set_defaults(func=cmd_list_comments)
+
+    # ── Dependencies ──
+
+    p = sub.add_parser("add-dependency", help="Mark a task as depending on another")
+    p.add_argument("--task", required=True, help="Task that has the dependency")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.add_argument("--depends-on", required=True, help="Task GID it depends on")
+    p.set_defaults(func=cmd_add_dependency)
+
+    p = sub.add_parser("remove-dependency", help="Remove a dependency from a task")
+    p.add_argument("--task", required=True, help="Task name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.add_argument("--depends-on", required=True, help="Task GID to remove as dependency")
+    p.set_defaults(func=cmd_remove_dependency)
+
+    # ── Bulk Operations ──
+
+    p = sub.add_parser("bulk-complete", help="Complete multiple tasks at once")
+    p.add_argument("--tasks", required=True, help="Comma-separated task GIDs")
+    p.set_defaults(func=cmd_bulk_complete)
+
+    p = sub.add_parser("bulk-move", help="Move multiple tasks to a section")
+    p.add_argument("--tasks", required=True, help="Comma-separated task GIDs")
+    p.add_argument("--section", required=True, help="Target section name or GID")
+    p.add_argument("--project", help="Project context for name resolution")
+    p.set_defaults(func=cmd_bulk_move)
 
     # ── Tags ──
 
@@ -721,6 +1001,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--notes", default="", help="Project description")
     p.set_defaults(func=cmd_create_project)
 
+    p = sub.add_parser("get-project", help="View full project details with stats")
+    p.add_argument("--project", required=True, help="Project name or GID")
+    p.set_defaults(func=cmd_get_project)
+
+    p = sub.add_parser("update-project", help="Update project properties")
+    p.add_argument("--project", required=True, help="Project name or GID")
+    p.add_argument("--name", help="New project name")
+    p.add_argument("--notes", help="New project description/notes")
+    p.add_argument("--color", help="Project color (e.g. dark-red, light-green)")
+    p.set_defaults(func=cmd_update_project)
+
     p = sub.add_parser("list-projects", help="List projects in the workspace")
     p.add_argument("--archived", action="store_true", help="Show only archived projects")
     p.add_argument("--all", action="store_true", help="Show both active and archived")
@@ -738,6 +1029,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", required=True, help="Project name or GID")
     p.add_argument("--confirm", action="store_true", help="Required to confirm deletion")
     p.set_defaults(func=cmd_delete_project)
+
+    p = sub.add_parser("duplicate-project", help="Clone a project with tasks")
+    p.add_argument("--project", required=True, help="Source project name or GID")
+    p.add_argument("--name", required=True, help="Name for the new project")
+    p.set_defaults(func=cmd_duplicate_project)
 
     # ── Members ──
 
@@ -789,7 +1085,6 @@ def main() -> None:
 
     client = AsanaClient(token)
 
-    # Resolve workspace: use env var or auto-detect from the user's account
     workspace_gid = os.environ.get("ASANA_WORKSPACE_GID", "")
     if not workspace_gid:
         result = client.request("GET", "/users/me?opt_fields=workspaces.gid,workspaces.name")

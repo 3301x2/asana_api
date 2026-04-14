@@ -1,4 +1,4 @@
-# Asana Manager CLI
+# Asana CLI
 
 A zero-dependency Python CLI for managing Asana workspaces from the terminal. Built entirely on the Python standard library and the [Asana REST API](https://developers.asana.com/reference/rest-api-reference).
 
@@ -6,15 +6,19 @@ Includes a GitHub Actions integration that automatically syncs commit history to
 
 ## Features
 
-| Category        | Operations                                                |
-|-----------------|-----------------------------------------------------------|
-| **Projects**    | Create, list, archive, unarchive, delete                  |
-| **Tasks**       | Create, update, move, complete, delete, list              |
-| **Sections**    | Create, list, rename, delete                              |
-| **Tags**        | Create, add to / remove from tasks, list, delete          |
-| **Members**     | List, add, remove (workspace and project scope)           |
-| **Audit Log**   | Queryable JSONL log of every write operation               |
-| **Sync**        | Automated GitHub commit-to-Asana ticket pipeline          |
+| Category         | Operations                                                          |
+|------------------|---------------------------------------------------------------------|
+| **Projects**     | Create, get, update, list, archive, unarchive, delete, duplicate    |
+| **Tasks**        | Create, get, update, move, complete, uncomplete, delete, list, search |
+| **Subtasks**     | Add, list                                                           |
+| **Comments**     | Add, list                                                           |
+| **Dependencies** | Add, remove                                                         |
+| **Bulk Ops**     | Bulk complete, bulk move                                            |
+| **Sections**     | Create, list, rename, delete                                        |
+| **Tags**         | Create, add to / remove from tasks, list, delete                    |
+| **Members**      | List, add, remove (workspace and project scope)                     |
+| **Audit Log**    | Queryable JSONL log of every write operation                         |
+| **Sync**         | Automated GitHub commit-to-Asana ticket pipeline                    |
 
 ### Name Resolution
 
@@ -54,7 +58,7 @@ export ASANA_WORKSPACE_GID="your_workspace_gid"  # optional, auto-detected
 ### 3. Run
 
 ```bash
-python3 asana_api.py <command> [options]
+python3 asana_cli.py <command> [options]
 ```
 
 ---
@@ -64,55 +68,89 @@ python3 asana_api.py <command> [options]
 ### Projects
 
 ```bash
-python3 asana_api.py create-project --name "New Project" --layout board --notes "Description"
-python3 asana_api.py list-projects
-python3 asana_api.py list-projects --archived
-python3 asana_api.py archive-project --project "Old Project"
-python3 asana_api.py unarchive-project --project "Old Project"
-python3 asana_api.py delete-project --project "Old Project" --confirm
+python3 asana_cli.py create-project --name "New Project" --layout board --notes "Description"
+python3 asana_cli.py get-project --project "MyProject"
+python3 asana_cli.py update-project --project "MyProject" --name "New Name" --color dark-blue
+python3 asana_cli.py list-projects
+python3 asana_cli.py list-projects --archived
+python3 asana_cli.py archive-project --project "Old Project"
+python3 asana_cli.py unarchive-project --project "Old Project"
+python3 asana_cli.py delete-project --project "Old Project" --confirm
+python3 asana_cli.py duplicate-project --project "Template" --name "New From Template"
 ```
 
 ### Sections
 
 ```bash
-python3 asana_api.py create-section --project "MyProject" --name "Backlog"
-python3 asana_api.py list-sections --project "MyProject"
-python3 asana_api.py rename-section --project "MyProject" --section "Backlog" --name "Archive"
-python3 asana_api.py delete-section --project "MyProject" --section "Archive"
+python3 asana_cli.py create-section --project "MyProject" --name "Backlog"
+python3 asana_cli.py list-sections --project "MyProject"
+python3 asana_cli.py rename-section --project "MyProject" --section "Backlog" --name "Archive"
+python3 asana_cli.py delete-section --project "MyProject" --section "Archive"
 ```
 
 ### Tasks
 
 ```bash
-python3 asana_api.py create-task --project "MyProject" --section "To Do" \
+python3 asana_cli.py create-task --project "MyProject" --section "To Do" \
     --name "Fix bug" --notes "Details" --due-on 2025-12-31
-python3 asana_api.py list-tasks --project "MyProject"
-python3 asana_api.py list-tasks --project "MyProject" --section "In Progress"
-python3 asana_api.py update-task --task "Fix bug" --project "MyProject" --name "Fix critical bug"
-python3 asana_api.py move-task --task "Fix bug" --project "MyProject" --section "Done"
-python3 asana_api.py complete-task --task "Fix bug" --project "MyProject"
-python3 asana_api.py delete-task --task "Fix bug" --project "MyProject"
+python3 asana_cli.py get-task --task <task_gid>
+python3 asana_cli.py list-tasks --project "MyProject"
+python3 asana_cli.py list-tasks --project "MyProject" --section "In Progress"
+python3 asana_cli.py search-tasks --query "auth" --project "MyProject"
+python3 asana_cli.py update-task --task "Fix bug" --project "MyProject" --name "Fix critical bug"
+python3 asana_cli.py move-task --task "Fix bug" --project "MyProject" --section "Done"
+python3 asana_cli.py complete-task --task "Fix bug" --project "MyProject"
+python3 asana_cli.py uncomplete-task --task "Fix bug" --project "MyProject"
+python3 asana_cli.py delete-task --task "Fix bug" --project "MyProject"
+```
+
+### Subtasks
+
+```bash
+python3 asana_cli.py add-subtask --task <task_gid> --name "Step 1" --notes "Details"
+python3 asana_cli.py list-subtasks --task <task_gid>
+```
+
+### Comments
+
+```bash
+python3 asana_cli.py add-comment --task <task_gid> --text "Looks good, merging."
+python3 asana_cli.py list-comments --task <task_gid>
+```
+
+### Dependencies
+
+```bash
+python3 asana_cli.py add-dependency --task <task_gid> --depends-on <other_task_gid>
+python3 asana_cli.py remove-dependency --task <task_gid> --depends-on <other_task_gid>
+```
+
+### Bulk Operations
+
+```bash
+python3 asana_cli.py bulk-complete --tasks "gid1,gid2,gid3"
+python3 asana_cli.py bulk-move --tasks "gid1,gid2,gid3" --section "Done" --project "MyProject"
 ```
 
 ### Tags
 
 ```bash
-python3 asana_api.py create-tag --name "urgent" --color dark-red
-python3 asana_api.py list-tags
-python3 asana_api.py add-tag --task <task_gid> --tag <tag_gid>
-python3 asana_api.py remove-tag --task <task_gid> --tag <tag_gid>
-python3 asana_api.py delete-tag --tag <tag_gid>
+python3 asana_cli.py create-tag --name "urgent" --color dark-red
+python3 asana_cli.py list-tags
+python3 asana_cli.py add-tag --task <task_gid> --tag <tag_gid>
+python3 asana_cli.py remove-tag --task <task_gid> --tag <tag_gid>
+python3 asana_cli.py delete-tag --tag <tag_gid>
 ```
 
 ### Members
 
 ```bash
-python3 asana_api.py list-members
-python3 asana_api.py list-members --project "MyProject"
-python3 asana_api.py add-member --email user@example.com
-python3 asana_api.py remove-member --user "John Doe"
-python3 asana_api.py add-project-member --project "MyProject" --user user@example.com
-python3 asana_api.py remove-project-member --project "MyProject" --user user@example.com
+python3 asana_cli.py list-members
+python3 asana_cli.py list-members --project "MyProject"
+python3 asana_cli.py add-member --email user@example.com
+python3 asana_cli.py remove-member --user "John Doe"
+python3 asana_cli.py add-project-member --project "MyProject" --user user@example.com
+python3 asana_cli.py remove-project-member --project "MyProject" --user user@example.com
 ```
 
 ### Audit Log
@@ -120,11 +158,11 @@ python3 asana_api.py remove-project-member --project "MyProject" --user user@exa
 Every write operation is logged to `audit_log.jsonl` with timestamps.
 
 ```bash
-python3 asana_api.py audit-log
-python3 asana_api.py audit-log --last 10
-python3 asana_api.py audit-log --action create-task
-python3 asana_api.py audit-log --since 2025-01-01
-python3 asana_api.py audit-log --clear
+python3 asana_cli.py audit-log
+python3 asana_cli.py audit-log --last 10
+python3 asana_cli.py audit-log --action create-task
+python3 asana_cli.py audit-log --since 2025-01-01
+python3 asana_cli.py audit-log --clear
 ```
 
 All output is structured JSON, making it easy to pipe into `jq` or other tools.
@@ -190,12 +228,12 @@ python3 sync_commits.py
 
 ```
 asana_api/
-├── asana_api.py                     # CLI tool
+├── asana_cli.py                     # CLI tool (40 commands)
 ├── sync_commits.py                  # GitHub-to-Asana sync engine
 ├── .github/
 │   └── workflows/
 │       ├── weekly-sync.yml          # Friday commit sync
-│       └── new-repo-sync.yml        # Monday new-repo detection
+│       └── new-repo-sync.yml       # Monday new-repo detection
 ├── .env.example                     # Environment variable template
 ├── .gitignore
 ├── LICENSE
