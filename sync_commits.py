@@ -328,8 +328,12 @@ class SyncEngine:
 
         return project
 
-    def _sync_repo(self, repo: dict) -> None:
-        """Sync a single repository's commits to its Asana board."""
+    def _sync_repo(self, repo: dict, boards_only: bool = False) -> None:
+        """Sync a single repository's commits to its Asana board.
+
+        When boards_only is True, ensure the board exists but skip all
+        commit fetching and task creation.
+        """
         name = repo["name"]
         print(f"\n--- {name} ---")
 
@@ -357,6 +361,10 @@ class SyncEngine:
 
         project_gid = project["gid"]
         repo_state["project_gid"] = project_gid
+
+        if boards_only:
+            self._state.set_repo(name, repo_state)
+            return
 
         # Fetch commits since last sync
         default_branch = self._get_default_branch(name)
@@ -510,7 +518,7 @@ def main() -> None:
                 if alt in project_names:
                     continue
                 print(f"New repo detected: {name}")
-            engine._sync_repo(repo)
+            engine._sync_repo(repo, boards_only=args.new_only)
 
         engine._state.save()
         print(f"\nDone. State saved to {config.state_path}")
