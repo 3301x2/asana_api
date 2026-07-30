@@ -37,6 +37,18 @@ GITHUB_API_BASE = "https://api.github.com"
 
 DEFAULT_BOARD_SECTIONS = ["Done", "In Progress", "Backlog"]
 
+# Multiple repos can belong to one product. Map a repo name to the single
+# Asana board that product's commits should sync into, so front-end/back-end
+# repos land on the product board instead of creating duplicate boards.
+REPO_BOARD_ALIASES = {
+    "podiq-frontend": "PodIQ — Podcast Analytics",
+    "podiq-backend": "PodIQ — Podcast Analytics",
+    "v0-podcast-analytics": "PodIQ — Podcast Analytics",
+    "lushaka-orders": "Lushaka Meat Supply",
+    "eternityfine-website": "EternityFine Website",
+    "maestroOS-frontend": "MaestroOS",
+}
+
 CONVENTIONAL_PREFIXES = {
     "feat": "Feature",
     "fix": "Bug Fix",
@@ -339,10 +351,12 @@ class SyncEngine:
 
         repo_state = self._state.get_repo(name)
 
-        # Find or create the corresponding Asana board
-        project = self._find_asana_project(name)
+        # Find or create the corresponding Asana board. Repos that belong to a
+        # shared product resolve to that product's board via REPO_BOARD_ALIASES.
+        board_name = REPO_BOARD_ALIASES.get(name, name)
+        project = self._find_asana_project(board_name)
         if not project:
-            project = self._find_asana_project(name.replace("-", " ").title())
+            project = self._find_asana_project(board_name.replace("-", " ").title())
 
         if not project:
             description = repo.get("description") or ""
@@ -512,9 +526,10 @@ def main() -> None:
             if name in config.skip_repos:
                 continue
             if args.new_only:
-                if name.lower() in project_names:
+                board_name = REPO_BOARD_ALIASES.get(name, name)
+                if board_name.lower() in project_names:
                     continue
-                alt = name.replace("-", " ").title().lower()
+                alt = board_name.replace("-", " ").title().lower()
                 if alt in project_names:
                     continue
                 print(f"New repo detected: {name}")
